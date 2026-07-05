@@ -119,17 +119,90 @@ where `Ib` is the aircraft inertia tensor, `F_b` is the total body-axis force (a
 
 ---
 
-## Constants (`initialize_constants.m`)
+## Simulation Driver Script (`initialize_constants.m`)
 
-This script should define all fixed physical parameters used by `RCAM_model.m`, including:
+This script initializes the **initial state and control trim values**, runs the Simulink model, and plots the resulting time histories. It performs three jobs:
 
-- **Mass & geometry**: aircraft mass, mean aerodynamic chord, wing/tail planform areas, tail moment arm
-- **CG, aerodynamic center, and engine mounting positions** (in the body/mean-aerodynamic-chord reference frame)
-- **Environmental constants**: air density, gravitational acceleration
-- **Aerodynamic model parameters**: downwash gradient, zero-lift angle of attack, lift-curve slope, stall polynomial coefficients, stall angle threshold
-- **Control surface limits** for aileron, stabilizer, rudder, and throttle
+1. **Defines the initial state vector `x0`** (9×1) and **initial/constant control vector `u`** (5×1) used to kick off the simulation.
+2. **Runs the Simulink model** `RCAM_model_run.slx` via the `sim()` command.
+3. **Extracts and plots** the logged control inputs (`simU`) and states (`simX`) from the Simulink `ans` output structure.
 
-> Ensure `initialize_constants.m` is run (or its variables are loaded into the workspace/Simulink model) **before** simulating `RCAM_model.m`, since the state-derivative function depends on these constants being defined in scope.
+```matlab
+%Initialize constants for the RCAM simulation
+clear
+clc
+close all
+%% Define constants
+x0 = [85;      %approx 165 knots
+      0;
+      0;
+      0;
+      0;
+      0;
+      0;
+      0.1;     %approx 5.73 deg
+      0];
+u = [0;
+     -0.1;     %approx -5.73 deg
+     0;
+     0.08;     %recall minimum for throttles are 0.5*pi/180 = 0.0087
+     0.08];
+%% run the model
+sim('RCAM_model_run.slx')
+%% Plot the results
+t = ans.simX.Time;
+u1 = ans.simU.Data(:,1);
+u2 = ans.simU.Data(:,2);
+u3 = ans.simU.Data(:,3);
+u4 = ans.simU.Data(:,4);
+u5 = ans.simU.Data(:,5);
+x1 = ans.simX.Data(:,1);
+x2 = ans.simX.Data(:,2);
+x3 = ans.simX.Data(:,3);
+x4 = ans.simX.Data(:,4);
+x5 = ans.simX.Data(:,5);
+x6 = ans.simX.Data(:,6);
+x7 = ans.simX.Data(:,7);
+x8 = ans.simX.Data(:,8);
+x9 = ans.simX.Data(:,9);
+
+figure
+subplot(5,1,1); plot(t,u1); legend('u_1'); grid on
+subplot(5,1,2); plot(t,u2); legend('u_2'); grid on
+subplot(5,1,3); plot(t,u3); legend('u_3'); grid on
+subplot(5,1,4); plot(t,u4); legend('u_4'); grid on
+subplot(5,1,5); plot(t,u5); legend('u_5'); grid on
+
+%Plot the states
+figure
+%u, v, w
+subplot(3,3,1); plot(t,x1); legend('x_1'); grid on
+subplot(3,3,4); plot(t,x2); legend('x_2'); grid on
+subplot(3,3,7); plot(t,x3); legend('x_3'); grid on
+%p, q, r
+subplot(3,3,2); plot(t,x4); legend('x_4'); grid on
+subplot(3,3,5); plot(t,x5); legend('x_5'); grid on
+subplot(3,3,8); plot(t,x6); legend('x_6'); grid on
+%phi, theta, psi
+subplot(3,3,3); plot(t,x7); legend('x_7'); grid on
+subplot(3,3,6); plot(t,x8); legend('x_8'); grid on
+subplot(3,3,9); plot(t,x9); legend('x_9'); grid on
+```
+
+### Example trim values used
+
+| Variable | Value | Meaning |
+|---|---|---|
+| `x0(1) = u` | 85 m/s | Approx. 165 knots forward airspeed |
+| `x0(8) = θ` | 0.1 rad | Approx. 5.73° initial pitch angle |
+| `u(2) = δT` | −0.1 rad | Approx. −5.73° stabilizer deflection |
+| `u(4), u(5) = δth1, δth2` | 0.08 rad | Throttle settings (minimum allowed is 0.5°≈0.0087 rad) |
+
+All other states and controls (`v, w, p, q, r, φ, ψ, δA, δR`) are initialized to zero.
+
+> **Note:** The Simulink model must log the control and state signals to workspace variables named `simU` and `simX` (e.g., via "To Workspace" blocks or signal logging configured with these names) for the plotting section of this script to work correctly.
+>
+> Also note the `sim()` call references the Simulink file by name (`RCAM_model_run.slx`) — make sure the filename casing matches exactly, since MATLAB/Simulink file references can be case-sensitive on some operating systems (e.g., Linux).
 
 ---
 
@@ -151,19 +224,29 @@ This Simulink model enables:
 
 ## Usage
 
-1. Run `initialize_constants.m` in the MATLAB workspace to load all model constants.
-2. Open and run `RCAM_model_run.slx` in Simulink, or call `RCAM_model.m` directly from a MATLAB script/ODE solver:
+1. Make sure all three files (`RCAM_model.m`, `initialize_constants.m`, `RCAM_model_run.slx`) are in the same MATLAB working directory (or on the MATLAB path).
+2. Open `RCAM_model_run.slx` in Simulink and confirm it references `RCAM_model.m` (e.g., via a MATLAB Function block) and logs the state and control signals to workspace variables named `simX` and `simU` respectively (e.g., using "To Workspace" blocks or Simulink signal logging).
+3. Run `initialize_constants.m` directly from the MATLAB Command Window:
 
 ```matlab
-initialize_constants;   % load constants into base workspace
-
-X0 = [85; 0; 0; 0; 0; 0; 0; 0.1; 0];   % initial state guess
-U0 = [0; -0.1; 0; 0.08; 0.08];          % initial control input guess
-
-[t, X] = ode45(@(t, X) RCAM_model(X, U0), [0 60], X0);
+initialize_constants
 ```
 
-3. Post-process the resulting state history to analyze aircraft response, or use the Simulink model to interactively adjust control inputs and observe the aircraft's nonlinear response in real time.
+This will:
+- Set the initial state `x0` (85 m/s forward speed, 0.1 rad pitch, all other states zero) and the control vector `u` (stabilizer at −0.1 rad, both throttles at 0.08) in the base workspace.
+- Automatically launch the Simulink simulation via `sim('RCAM_model_run.slx')`.
+- Automatically generate two figures once the simulation completes:
+  - **Figure 1**: time histories of the 5 control inputs (`u1`–`u5`)
+  - **Figure 2**: a 3×3 grid of the 9 state time histories, grouped as body-axis velocities (`x1–x3`), body rates (`x4–x6`), and Euler angles (`x7–x9`)
+
+4. To explore different flight conditions or control inputs, edit the `x0` and `u` vectors at the top of `initialize_constants.m` and re-run the script. Remember the physical limits enforced inside `RCAM_model.m`:
+
+| Control | Min | Max |
+|---|---|---|
+| `δA` (aileron) | −25° | +25° |
+| `δT` (stabilizer) | −25° | +10° |
+| `δR` (rudder) | −30° | +30° |
+| `δth1`, `δth2` (throttles) | 0.5° (≈0.0087 rad) | 10° |
 
 ---
 
@@ -179,6 +262,3 @@ U0 = [0; -0.1; 0; 0.08; 0.08];          % initial control input guess
 
 - Lum, C. — RCAM Modeling Lecture Series (YouTube), which this implementation is based on/inspired by.
 - GARTEUR Action Group FM(AG08) — *Design Challenge: A Robust Flight Control Design Challenge Problem Formulation and Manual: The Research Civil Aircraft Model (RCAM)*, the original RCAM benchmark specification.
-
----
-
